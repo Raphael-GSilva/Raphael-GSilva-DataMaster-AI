@@ -1,0 +1,61 @@
+# Ambiente virtual
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Bancos de dados
+*.db
+*.sqlite
+*.sqlite3
+
+# Memória vetorial / Chroma
+06_Vector_DB/
+chroma/
+chroma_db/
+
+# Workspace local
+01_Workspace/*
+!01_Workspace/.gitkeep
+
+# Memória local
+04_Memory/*
+!04_Memory/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Modelos / arquivos grandes
+*.bin
+*.safetensors
+*.gguf
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Build / distribuição
+build/
+dist/
+*.egg-info/
+
+# Temporários
+*.tmp
+*.temp

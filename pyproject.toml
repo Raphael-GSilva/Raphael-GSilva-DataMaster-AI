@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datamaster_ai"
+version = "1.0.0"
+description = "Raphael-GSilva DataMaster AI"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "loguru",
+    "rich",
+    "pydantic",
+    "python-dotenv",
+    "typer"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "src/datamaster_ai"
+]
+python_files = [
+    "test_*.py"
+]
+python_classes = [
+    "Test*"
+]
+python_functions = [
+    "test_*"
+]
