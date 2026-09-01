@@ -5,15 +5,32 @@ from typing import TypedDict
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
-from datamaster_ai.agents.task_planner import TaskPlanner
-from datamaster_ai.agents.tool_executor import ToolExecutor
-from datamaster_ai.agents.tool_router import ToolRouter
+from datamaster_ai.agents.task_planner import (
+    TaskPlanner,
+)
+from datamaster_ai.agents.tool_executor import (
+    ToolExecutor,
+)
+from datamaster_ai.agents.tool_router import (
+    ToolRouter,
+)
 from datamaster_ai.config.settings import settings
+from datamaster_ai.core.knowledge_base import (
+    KnowledgeBase,
+)
 from datamaster_ai.core.memory import MemoryManager
-from datamaster_ai.core.memory_extractor import MemoryExtractor
-from datamaster_ai.core.structured_memory import StructuredMemory
-from datamaster_ai.core.vector_memory import VectorMemory
-from datamaster_ai.tools.registry import DataMasterToolRegistry
+from datamaster_ai.core.memory_extractor import (
+    MemoryExtractor,
+)
+from datamaster_ai.core.structured_memory import (
+    StructuredMemory,
+)
+from datamaster_ai.core.vector_memory import (
+    VectorMemory,
+)
+from datamaster_ai.tools.registry import (
+    DataMasterToolRegistry,
+)
 
 
 class AgentState(TypedDict):
@@ -21,6 +38,7 @@ class AgentState(TypedDict):
     response: str
     context: str
     vector_context: str
+    knowledge_context: str
     tool_result: str
     tool_name: str
     plan: str
@@ -30,19 +48,17 @@ class DataMasterGraph:
     """
     Grafo principal do Raphael-GSilva DataMaster AI.
 
-    Responsável por:
+    Fluxo:
 
-    - processar mensagens;
-    - consultar memória conversacional;
-    - consultar memória estruturada;
-    - consultar memória vetorial;
-    - identificar ferramentas;
-    - planejar execução;
-    - executar ferramentas;
-    - utilizar resultados reais;
-    - gerar respostas;
-    - extrair novas memórias;
-    - armazenar novas interações.
+    - memória conversacional;
+    - memória estruturada;
+    - memória vetorial;
+    - base de conhecimento;
+    - roteamento de ferramentas;
+    - planejamento;
+    - execução;
+    - geração da resposta;
+    - persistência das memórias.
     """
 
     def __init__(self) -> None:
@@ -54,40 +70,69 @@ class DataMasterGraph:
             num_predict=512,
         )
 
-        self.memory = MemoryManager()
-
-        self.structured_memory = StructuredMemory()
-
-        self.memory_extractor = MemoryExtractor(
-            memory=self.structured_memory
+        self.memory = (
+            MemoryManager()
         )
 
-        self.vector_memory = VectorMemory()
-
-        self.tools = DataMasterToolRegistry()
-
-        self.router = ToolRouter()
-
-        self.planner = TaskPlanner()
-
-        self.executor = ToolExecutor(
-            self.tools
+        self.structured_memory = (
+            StructuredMemory()
         )
 
-        self.graph = self._build_graph()
+        self.memory_extractor = (
+            MemoryExtractor(
+                memory=(
+                    self.structured_memory
+                )
+            )
+        )
+
+        self.vector_memory = (
+            VectorMemory()
+        )
+
+        self.knowledge_base = (
+            KnowledgeBase(
+                vector_memory=(
+                    self.vector_memory
+                )
+            )
+        )
+
+        self.tools = (
+            DataMasterToolRegistry()
+        )
+
+        self.router = (
+            ToolRouter()
+        )
+
+        self.planner = (
+            TaskPlanner()
+        )
+
+        self.executor = (
+            ToolExecutor(
+                self.tools
+            )
+        )
+
+        self.graph = (
+            self._build_graph()
+        )
 
     def _load_memory(
         self,
         state: AgentState,
     ) -> AgentState:
         """
-        Recupera as últimas interações da memória
-        conversacional e informações relevantes
-        da memória estruturada.
+        Carrega memória conversacional
+        e memória estruturada.
         """
 
-        memories = self.memory.get_messages(
-            limit=5
+        memories = (
+            self.memory.get_messages(
+                limit=5
+            )
         )
 
         context_parts = []
@@ -103,7 +148,9 @@ class DataMasterGraph:
 
             context_parts.append(
                 "MEMÓRIA CONVERSACIONAL:\n"
-                + "\n\n".join(context_lines)
+                + "\n\n".join(
+                    context_lines
+                )
             )
 
         structured_items = (
@@ -122,21 +169,26 @@ class DataMasterGraph:
 
             context_parts.append(
                 "MEMÓRIA ESTRUTURADA:\n"
-                + "\n".join(structured_lines)
+                + "\n".join(
+                    structured_lines
+                )
             )
 
-        if not context_parts:
+        if context_parts:
+            context = "\n\n".join(
+                context_parts
+            )
+        else:
             context = (
                 "Nenhuma memória anterior disponível."
             )
-        else:
-            context = "\n\n".join(context_parts)
 
         return {
             "message": state["message"],
             "response": "",
             "context": context,
             "vector_context": "",
+            "knowledge_context": "",
             "tool_result": "",
             "tool_name": "none",
             "plan": "",
@@ -147,28 +199,25 @@ class DataMasterGraph:
         state: AgentState,
     ) -> AgentState:
         """
-        Consulta a memória vetorial utilizando
-        a mensagem atual como busca semântica.
+        Consulta memória vetorial semântica.
         """
 
         try:
-            results = self.vector_memory.search(
-                state["message"]
+            results = (
+                self.vector_memory.search(
+                    state["message"]
+                )
             )
         except Exception:
             results = []
 
-        if not results:
-            vector_context = (
-                "Nenhuma memória vetorial relevante encontrada."
-            )
-        else:
+        if results:
             lines = []
 
             for result in results:
                 content = result.get(
                     "content",
-                    ""
+                    "",
                 )
 
                 if content:
@@ -179,41 +228,150 @@ class DataMasterGraph:
             if lines:
                 vector_context = (
                     "MEMÓRIA VETORIAL RELEVANTE:\n"
-                    + "\n".join(lines)
+                    + "\n".join(
+                        lines
+                    )
                 )
             else:
                 vector_context = (
-                    "Nenhuma memória vetorial relevante encontrada."
+                    "Nenhuma memória vetorial "
+                    "relevante encontrada."
                 )
+        else:
+            vector_context = (
+                "Nenhuma memória vetorial "
+                "relevante encontrada."
+            )
 
         return {
             "message": state["message"],
-            "response": "",
+            "response": state.get(
+                "response",
+                "",
+            ),
+            "context": state.get(
+                "context",
+                "",
+            ),
+            "vector_context": (
+                vector_context
+            ),
+            "knowledge_context": (
+                state.get(
+                    "knowledge_context",
+                    "",
+                )
+            ),
+            "tool_result": state.get(
+                "tool_result",
+                "",
+            ),
+            "tool_name": state.get(
+                "tool_name",
+                "none",
+            ),
+            "plan": state.get(
+                "plan",
+                "",
+            ),
+        }
+
+    def _load_knowledge_base(
+        self,
+        state: AgentState,
+    ) -> AgentState:
+        """
+        Recupera documentos relevantes
+        da Knowledge Base.
+        """
+
+        try:
+            results = (
+                self.knowledge_base.search(
+                    state["message"],
+                    limit=5,
+                )
+            )
+        except Exception:
+            results = []
+
+        if results:
+            lines = []
+
+            for result in results:
+                content = result.get(
+                    "content",
+                    "",
+                )
+
+                metadata = result.get(
+                    "metadata",
+                    {},
+                )
+
+                source = metadata.get(
+                    "filename",
+                    metadata.get(
+                        "source",
+                        "desconhecida",
+                    ),
+                )
+
+                if content:
+                    lines.append(
+                        f"[Fonte: {source}]\n"
+                        f"{content}"
+                    )
+
+            if lines:
+                knowledge_context = (
+                    "BASE DE CONHECIMENTO "
+                    "RELEVANTE:\n\n"
+                    + "\n\n".join(
+                        lines
+                    )
+                )
+            else:
+                knowledge_context = (
+                    "Nenhum conhecimento "
+                    "relevante encontrado."
+                )
+        else:
+            knowledge_context = (
+                "Nenhum conhecimento "
+                "relevante encontrado."
+            )
+
+        return {
+            "message": state["message"],
+            "response": state["response"],
             "context": state["context"],
-            "vector_context": vector_context,
-            "tool_result": "",
-            "tool_name": "none",
-            "plan": "",
+            "vector_context": (
+                state["vector_context"]
+            ),
+            "knowledge_context": (
+                knowledge_context
+            ),
+            "tool_result": (
+                state["tool_result"]
+            ),
+            "tool_name": (
+                state["tool_name"]
+            ),
+            "plan": state["plan"],
         }
 
     def _detect_tool(
         self,
         state: AgentState,
     ) -> AgentState:
-        """
-        Utiliza o ToolRouter para determinar
-        qual ferramenta deve ser utilizada.
-        """
-
         tool_name = self.router.detect(
             state["message"]
         )
 
         return {
-            "message": state["message"],
+            **state,
             "response": "",
-            "context": state["context"],
-            "vector_context": state["vector_context"],
             "tool_result": "",
             "tool_name": tool_name,
             "plan": "",
@@ -223,68 +381,57 @@ class DataMasterGraph:
         self,
         state: AgentState,
     ) -> AgentState:
-        """
-        Cria o plano de execução utilizando
-        o TaskPlanner.
-        """
-
-        task_plan = self.planner.create_plan(
-            state["message"],
-            state["tool_name"],
+        task_plan = (
+            self.planner.create_plan(
+                state["message"],
+                state["tool_name"],
+            )
         )
 
         return {
-            "message": state["message"],
+            **state,
             "response": "",
-            "context": state["context"],
-            "vector_context": state["vector_context"],
             "tool_result": "",
-            "tool_name": state["tool_name"],
-            "plan": task_plan.instruction,
+            "plan": (
+                task_plan.instruction
+            ),
         }
 
     def _execute_tool(
         self,
         state: AgentState,
     ) -> AgentState:
-        """
-        Executa a ferramenta selecionada.
-        """
-
-        tool_name = state["tool_name"]
+        tool_name = state[
+            "tool_name"
+        ]
 
         if tool_name == "file":
-            tool_result = self._execute_file_tool(
-                state["message"]
+            tool_result = (
+                self._execute_file_tool(
+                    state["message"]
+                )
             )
 
         elif tool_name == "python":
-            tool_result = self._execute_python_tool(
-                state["message"]
+            tool_result = (
+                self._execute_python_tool(
+                    state["message"]
+                )
             )
 
         else:
             tool_result = ""
 
         return {
-            "message": state["message"],
+            **state,
             "response": "",
-            "context": state["context"],
-            "vector_context": state["vector_context"],
             "tool_result": tool_result,
-            "tool_name": tool_name,
-            "plan": state["plan"],
         }
 
     def _execute_file_tool(
         self,
         message: str,
     ) -> str:
-        """
-        Identifica o arquivo solicitado e executa
-        a FileTool através do ToolExecutor.
-        """
-
         match = re.search(
             r"([A-Za-z0-9_.-]+\.[A-Za-z0-9]+)",
             message,
@@ -312,49 +459,55 @@ class DataMasterGraph:
                 f"{settings.WORKSPACE_DIR}"
             )
 
-        result = self.executor.execute(
-            "file",
-            filename,
+        result = (
+            self.executor.execute(
+                "file",
+                filename,
+            )
         )
 
-        return str(result)
+        return str(
+            result
+        )
 
     def _execute_python_tool(
         self,
         message: str,
     ) -> str:
-        """
-        Extrai código Python da mensagem e executa
-        através do ToolExecutor.
-        """
-
-        code = self._extract_python_code(
-            message
+        code = (
+            self._extract_python_code(
+                message
+            )
         )
 
-        result = self.executor.execute(
-            "python",
-            code,
+        result = (
+            self.executor.execute(
+                "python",
+                code,
+            )
         )
 
-        return str(result)
+        return str(
+            result
+        )
 
     def _extract_python_code(
         self,
         message: str,
     ) -> str:
-        """
-        Extrai código Python de uma solicitação.
-        """
-
         code_match = re.search(
             r"```python\s*(.*?)```",
             message,
-            re.IGNORECASE | re.DOTALL,
+            re.IGNORECASE
+            | re.DOTALL,
         )
 
         if code_match:
-            return code_match.group(1).strip()
+            return (
+                code_match.group(
+                    1
+                ).strip()
+            )
 
         expression_match = re.search(
             r"(\d+(?:\.\d+)?\s*"
@@ -365,12 +518,16 @@ class DataMasterGraph:
 
         if expression_match:
             expression = (
-                expression_match.group(1)
+                expression_match.group(
+                    1
+                )
             )
 
-            expression = expression.replace(
-                "^",
-                "**",
+            expression = (
+                expression.replace(
+                    "^",
+                    "**",
+                )
             )
 
             return (
@@ -381,25 +538,30 @@ class DataMasterGraph:
 
         return message
 
+    @staticmethod
     def _extract_python_stdout(
-        self,
         tool_result: str,
     ) -> str:
-        """
-        Extrai o stdout real retornado pelo PythonTool.
-        """
-
         try:
             parsed = ast.literal_eval(
                 tool_result
             )
-        except (ValueError, SyntaxError):
+        except (
+            ValueError,
+            SyntaxError,
+        ):
             return tool_result
 
-        if not isinstance(parsed, dict):
+        if not isinstance(
+            parsed,
+            dict,
+        ):
             return tool_result
 
-        if not parsed.get("success", False):
+        if not parsed.get(
+            "success",
+            False,
+        ):
             return tool_result
 
         stdout = parsed.get(
@@ -407,48 +569,42 @@ class DataMasterGraph:
             "",
         )
 
-        return str(stdout).strip()
+        return str(
+            stdout
+        ).strip()
 
     def _process_message(
         self,
         state: AgentState,
     ) -> AgentState:
-        """
-        Processa a mensagem.
-
-        Resultados determinísticos das ferramentas
-        são retornados diretamente.
-
-        Solicitações gerais utilizam o modelo local
-        juntamente com as memórias disponíveis.
-        """
-
-        if state["tool_name"] == "python":
-            response = self._extract_python_stdout(
-                state["tool_result"]
+        if (
+            state["tool_name"]
+            == "python"
+        ):
+            response = (
+                self._extract_python_stdout(
+                    state[
+                        "tool_result"
+                    ]
+                )
             )
 
             return {
-                "message": state["message"],
+                **state,
                 "response": response,
-                "context": state["context"],
-                "vector_context": state["vector_context"],
-                "tool_result": state["tool_result"],
-                "tool_name": state["tool_name"],
-                "plan": state["plan"],
             }
 
-        if state["tool_name"] == "file":
-            response = state["tool_result"]
-
+        if (
+            state["tool_name"]
+            == "file"
+        ):
             return {
-                "message": state["message"],
-                "response": response,
-                "context": state["context"],
-                "vector_context": state["vector_context"],
-                "tool_result": state["tool_result"],
-                "tool_name": state["tool_name"],
-                "plan": state["plan"],
+                **state,
+                "response": (
+                    state[
+                        "tool_result"
+                    ]
+                ),
             }
 
         prompt = f"""
@@ -475,6 +631,10 @@ MEMÓRIA VETORIAL:
 
 {state["vector_context"]}
 
+BASE DE CONHECIMENTO / RAG:
+
+{state["knowledge_context"]}
+
 PLANO:
 
 {state["plan"]}
@@ -486,68 +646,78 @@ NOVA MENSAGEM DO USUÁRIO:
 Regras:
 
 1. Utilize as memórias quando forem relevantes.
-2. Não invente informações.
-3. Não trate informações irrelevantes como fatos.
-4. Responda diretamente à solicitação.
-5. Se houver memória relacionada à pergunta, utilize-a.
-6. Responda em português.
-7. Seja objetivo, técnico e útil.
+2. Priorize a Base de Conhecimento quando ela contiver
+   informações relacionadas à pergunta.
+3. Não invente informações ausentes no contexto.
+4. Não trate informações irrelevantes como fatos.
+5. Responda diretamente à solicitação.
+6. Quando utilizar a Base de Conhecimento, mantenha
+   fidelidade ao conteúdo recuperado.
+7. Responda em português.
+8. Seja objetivo, técnico e útil.
 """
 
-        response = self.model.invoke(
-            prompt
+        response = (
+            self.model.invoke(
+                prompt
+            )
         )
 
         return {
-            "message": state["message"],
-            "response": response.content,
-            "context": state["context"],
-            "vector_context": state["vector_context"],
-            "tool_result": state["tool_result"],
-            "tool_name": state["tool_name"],
-            "plan": state["plan"],
+            **state,
+            "response": (
+                response.content
+            ),
         }
 
     def _save_memory(
         self,
         state: AgentState,
     ) -> AgentState:
-        """
-        Salva a interação atual e tenta extrair
-        novas informações persistentes.
-        """
-
         self.memory.save_message(
             role="user",
-            content=state["message"],
+            content=state[
+                "message"
+            ],
         )
 
         self.memory.save_message(
             role="assistant",
-            content=state["response"],
+            content=state[
+                "response"
+            ],
         )
 
         try:
-            self.memory_extractor.extract_and_save(
-                state["message"]
+            (
+                self.memory_extractor
+                .extract_and_save(
+                    state[
+                        "message"
+                    ]
+                )
             )
         except Exception:
             pass
 
         try:
             self.vector_memory.add(
-                state["message"]
+                state["message"],
+                metadata={
+                    "source": (
+                        "conversation"
+                    ),
+                    "type": "memory",
+                },
             )
         except Exception:
             pass
 
         return state
 
-    def _build_graph(self):
-        """
-        Constrói e compila o fluxo do LangGraph.
-        """
-
+    def _build_graph(
+        self,
+    ):
         workflow = StateGraph(
             AgentState
         )
@@ -560,6 +730,11 @@ Regras:
         workflow.add_node(
             "load_vector_memory",
             self._load_vector_memory,
+        )
+
+        workflow.add_node(
+            "load_knowledge_base",
+            self._load_knowledge_base,
         )
 
         workflow.add_node(
@@ -599,6 +774,11 @@ Regras:
 
         workflow.add_edge(
             "load_vector_memory",
+            "load_knowledge_base",
+        )
+
+        workflow.add_edge(
+            "load_knowledge_base",
             "detect_tool",
         )
 
@@ -633,28 +813,27 @@ Regras:
         self,
         message: str,
     ) -> str:
-        """
-        Executa o grafo e retorna a resposta.
-        """
-
         result = self.graph.invoke(
             {
                 "message": message,
                 "response": "",
                 "context": "",
                 "vector_context": "",
+                "knowledge_context": "",
                 "tool_result": "",
                 "tool_name": "none",
                 "plan": "",
             }
         )
 
-        return result["response"]
+        return result[
+            "response"
+        ]
 
 
 def create_graph() -> DataMasterGraph:
     """
-    Cria uma instância do grafo principal.
+    Cria o grafo principal.
     """
 
     return DataMasterGraph()
