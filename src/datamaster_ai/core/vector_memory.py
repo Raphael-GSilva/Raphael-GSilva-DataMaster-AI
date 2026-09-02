@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+from chromadb.config import Settings
 from langchain_huggingface import HuggingFaceEmbeddings
 
 
@@ -19,10 +20,11 @@ class VectorMemory:
     - armazenar textos no ChromaDB;
     - realizar busca semântica;
     - manter persistência em disco;
+    - permitir filtros por metadados;
     - permitir limpeza da coleção;
     - liberar recursos do ChromaDB;
     - funcionar corretamente no Windows;
-    - fornecer interface simples para o LangGraph.
+    - fornecer interface para o LangGraph e Knowledge Base.
     """
 
     DEFAULT_COLLECTION_NAME = "datamaster_memory"
@@ -40,36 +42,16 @@ class VectorMemory:
     ) -> None:
         """
         Inicializa a memória vetorial.
-
-        Args:
-            persist_directory:
-                Diretório onde o ChromaDB armazenará os dados.
-
-            collection_name:
-                Nome da coleção vetorial.
-
-            embedding_model:
-                Modelo Sentence Transformers utilizado
-                para gerar embeddings.
-
-            database_path:
-                Alias compatível com os testes e versões
-                anteriores do projeto.
         """
 
         if (
             persist_directory is not None
             and database_path is not None
         ):
-            persist_path = Path(
-                persist_directory
-            ).resolve()
-
-            database_path_resolved = Path(
-                database_path
-            ).resolve()
-
-            if persist_path != database_path_resolved:
+            if (
+                Path(persist_directory).resolve()
+                != Path(database_path).resolve()
+            ):
                 raise ValueError(
                     "persist_directory e database_path "
                     "apontam para diretórios diferentes."
@@ -95,38 +77,54 @@ class VectorMemory:
         self.collection_name = collection_name
         self.embedding_model = embedding_model
 
-        self._closed = False
-
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.embedding_model,
         )
 
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=chromadb.Settings(
-                anonymized_telemetry=False,
+        self.client = self._create_client()
+
+        self.collection = self._create_collection()
+
+        self._closed = False
+
+    def _create_client(self):
+        """
+        Cria cliente persistente do ChromaDB.
+        """
+
+        chroma_settings = Settings(
+            anonymized_telemetry=False,
+            chroma_api_impl=(
+                "chromadb.api.segment.SegmentAPI"
+            ),
+            is_persistent=True,
+            persist_directory=str(
+                self.persist_directory
             ),
         )
 
-        self.collection = (
-            self.client.get_or_create_collection(
-                name=self.collection_name,
-                metadata={
-                    "description": (
-                        "Memoria vetorial "
-                        "do Raphael-GSilva DataMaster AI"
-                    )
-                },
-            )
+        return chromadb.Client(
+            settings=chroma_settings,
         )
 
-    # ------------------------------------------------------------------
-    # UTILITÁRIOS
-    # ------------------------------------------------------------------
+    def _create_collection(self):
+        """
+        Cria ou recupera a coleção vetorial.
+        """
+
+        return self.client.get_or_create_collection(
+            name=self.collection_name,
+            metadata={
+                "description": (
+                    "Memoria vetorial "
+                    "do Raphael-GSilva DataMaster AI"
+                )
+            },
+        )
 
     def _ensure_open(self) -> None:
         """
-        Garante que a memória ainda está aberta.
+        Garante que a instância continua aberta.
         """
 
         if self._closed:
@@ -134,61 +132,15 @@ class VectorMemory:
                 "VectorMemory já foi encerrada."
             )
 
-    def _generate_id(self) -> str:
+    @staticmethod
+    def _generate_id() -> str:
         """
-        Gera identificador único para cada memória.
-        """
-
-        return str(uuid.uuid4())
-
-    # ------------------------------------------------------------------
-    # EMBEDDINGS
-    # ------------------------------------------------------------------
-
-    def _embed_documents(
-        self,
-        documents: list[str],
-    ) -> list[list[float]]:
-        """
-        Gera embeddings para documentos.
-
-        O método utiliza diretamente o objeto de embeddings
-        do LangChain para manter a geração de vetores
-        independente do mecanismo interno do ChromaDB.
+        Gera identificador único.
         """
 
-        if not documents:
-            return []
-
-        embeddings = self.embeddings.embed_documents(
-            documents
+        return str(
+            uuid.uuid4()
         )
-
-        return [
-            [float(value) for value in embedding]
-            for embedding in embeddings
-        ]
-
-    def _embed_query(
-        self,
-        query: str,
-    ) -> list[float]:
-        """
-        Gera o embedding de uma consulta.
-        """
-
-        embedding = self.embeddings.embed_query(
-            query
-        )
-
-        return [
-            float(value)
-            for value in embedding
-        ]
-
-    # ------------------------------------------------------------------
-    # ADICIONAR MEMÓRIA
-    # ------------------------------------------------------------------
 
     def add(
         self,
@@ -197,16 +149,6 @@ class VectorMemory:
     ) -> str:
         """
         Adiciona uma memória à coleção vetorial.
-
-        Args:
-            content:
-                Texto que será armazenado.
-
-            metadata:
-                Metadados opcionais.
-
-        Returns:
-            ID da memória criada.
         """
 
         self._ensure_open()
@@ -237,48 +179,50 @@ class VectorMemory:
 
                 if isinstance(
                     value,
-                    (str, int, float, bool),
+                    (
+                        str,
+                        int,
+                        float,
+                        bool,
+                    ),
                 ):
-                    final_metadata[str(key)] = value
+                    final_metadata[
+                        str(key)
+                    ] = value
                 else:
-                    final_metadata[str(key)] = str(
-                        value
-                    )
-
-        embedding = self._embed_documents(
-            [content]
-        )[0]
+                    final_metadata[
+                        str(key)
+                    ] = str(value)
 
         self.collection.add(
-            ids=[memory_id],
-            documents=[content],
-            embeddings=[embedding],
-            metadatas=[final_metadata],
+            ids=[
+                memory_id
+            ],
+            documents=[
+                content
+            ],
+            metadatas=[
+                final_metadata
+            ],
         )
 
         return memory_id
-
-    # ------------------------------------------------------------------
-    # BUSCA SEMÂNTICA
-    # ------------------------------------------------------------------
 
     def search(
         self,
         query: str,
         limit: int = 5,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Realiza busca semântica na memória vetorial.
+        Realiza busca semântica.
 
-        Args:
-            query:
-                Texto utilizado como consulta.
+        metadata_filter permite limitar a busca por
+        metadados do ChromaDB.
 
-            limit:
-                Número máximo de resultados.
+        Exemplo:
 
-        Returns:
-            Lista de memórias relevantes.
+            {"type": "knowledge"}
         """
 
         self._ensure_open()
@@ -301,19 +245,32 @@ class VectorMemory:
         if count == 0:
             return []
 
-        query_embedding = self._embed_query(
-            query
-        )
-
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(limit, count),
-            include=[
+        query_kwargs: dict[str, Any] = {
+            "query_texts": [
+                query
+            ],
+            "n_results": min(
+                limit,
+                count,
+            ),
+            "include": [
                 "documents",
                 "metadatas",
                 "distances",
             ],
-        )
+        }
+
+        if metadata_filter:
+            query_kwargs[
+                "where"
+            ] = metadata_filter
+
+        try:
+            results = self.collection.query(
+                **query_kwargs
+            )
+        except Exception:
+            return []
 
         documents = results.get(
             "documents",
@@ -359,7 +316,9 @@ class VectorMemory:
             else []
         )
 
-        output: list[dict[str, Any]] = []
+        output: list[
+            dict[str, Any]
+        ] = []
 
         for index, document in enumerate(
             documents
@@ -374,12 +333,14 @@ class VectorMemory:
                     "content": document,
                     "metadata": (
                         metadatas[index]
-                        if index < len(metadatas)
+                        if index
+                        < len(metadatas)
                         else {}
                     ),
                     "distance": (
                         distances[index]
-                        if index < len(distances)
+                        if index
+                        < len(distances)
                         else None
                     ),
                 }
@@ -387,29 +348,18 @@ class VectorMemory:
 
         return output
 
-    # ------------------------------------------------------------------
-    # CONTAGEM
-    # ------------------------------------------------------------------
-
     def count(self) -> int:
         """
-        Retorna a quantidade de memórias armazenadas.
+        Retorna a quantidade total de registros.
         """
 
         self._ensure_open()
 
         return self.collection.count()
 
-    # ------------------------------------------------------------------
-    # LIMPAR
-    # ------------------------------------------------------------------
-
     def clear(self) -> None:
         """
-        Remove todas as memórias da coleção.
-
-        A coleção é recriada imediatamente para que
-        o objeto continue utilizável.
+        Remove todos os registros da coleção.
         """
 
         self._ensure_open()
@@ -419,75 +369,46 @@ class VectorMemory:
         )
 
         self.collection = (
-            self.client.get_or_create_collection(
-                name=self.collection_name,
-                metadata={
-                    "description": (
-                        "Memoria vetorial "
-                        "do Raphael-GSilva DataMaster AI"
-                    )
-                },
-            )
+            self._create_collection()
         )
-
-    # ------------------------------------------------------------------
-    # FECHAMENTO
-    # ------------------------------------------------------------------
 
     def close(self) -> None:
         """
-        Libera os recursos utilizados pelo ChromaDB.
-
-        O ChromaDB 1.5.9 utiliza um sistema interno que
-        gerencia os recursos persistentes. Não acessamos
-        atributos privados como _server ou _system.
+        Libera referências utilizadas pelo ChromaDB.
         """
 
         if self._closed:
             return
 
-        client = getattr(
-            self,
-            "client",
-            None,
-        )
+        client = self.client
 
         self.collection = None
 
-        if client is not None:
-            try:
-                close_method = getattr(
-                    client,
-                    "close",
-                    None,
-                )
+        try:
+            close_method = getattr(
+                client,
+                "close",
+                None,
+            )
 
-                if callable(close_method):
-                    close_method()
+            if callable(
+                close_method
+            ):
+                close_method()
 
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         self.client = None
         self.embeddings = None
+
         self._closed = True
 
         gc.collect()
 
-    # ------------------------------------------------------------------
-    # CONTEXT MANAGER
-    # ------------------------------------------------------------------
-
     def __enter__(
         self,
     ) -> "VectorMemory":
-        """
-        Permite utilização com:
-
-            with VectorMemory(...) as memory:
-                ...
-        """
-
         self._ensure_open()
 
         return self
@@ -498,21 +419,9 @@ class VectorMemory:
         exc_value: Any,
         traceback: Any,
     ) -> None:
-        """
-        Fecha automaticamente a memória.
-        """
-
         self.close()
 
-    # ------------------------------------------------------------------
-    # DESTRUTOR
-    # ------------------------------------------------------------------
-
     def __del__(self) -> None:
-        """
-        Tentativa final de liberar recursos.
-        """
-
         try:
             self.close()
         except Exception:
